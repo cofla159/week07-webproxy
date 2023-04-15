@@ -175,14 +175,14 @@ void serve_static(int fd, char *filename, int filesize)
   Rio_writen(fd, buf, strlen(buf)); // line:netp:servestatic:endserve
 
   /* Send response body to client */
-  srcfd = Open(filename, O_RDONLY, 0); // line:netp:servestatic:open
-  // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0); // line:netp:servestatic:mmap
-  srcp = (char *)malloc(filesize);
-  Rio_readn(srcfd, srcp, filesize);
+  srcfd = Open(filename, O_RDONLY, 0);                        // line:netp:servestatic:open
+  srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0); // line:netp:servestatic:mmap
+  // srcp = (char *)malloc(filesize);
+  // Rio_readn(srcfd, srcp, filesize);
   Close(srcfd);                   // line:netp:servestatic:close
   Rio_writen(fd, srcp, filesize); // line:netp:servestatic:write
-  free(srcp);
-  // Munmap(srcp, filesize); // line:netp:servestatic:munmap
+  // free(srcp);
+  Munmap(srcp, filesize); // line:netp:servestatic:munmap
 }
 
 /*

@@ -3,6 +3,7 @@
  */
 /* $begin adder */
 #include "csapp.h"
+#include <stdio.h>
 
 int main(void)
 {
@@ -15,8 +16,8 @@ int main(void)
   {
     p = strchr(buf, '&');
     *p = '\0';
-    strcpy(arg1, buf);
-    strcpy(arg2, p + 1);
+    strcpy(arg1, buf + 5);
+    strcpy(arg2, p + 6);
     n1 = atoi(arg1);
     n2 = atoi(arg2);
   }
