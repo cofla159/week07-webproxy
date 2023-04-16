@@ -11,10 +11,10 @@ static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
 
-int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers);
-void request_to_server();
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response);
 void send_response();
-void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers);
+void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg);
@@ -22,7 +22,7 @@ void clienterror(int fd, char *cause, char *errnum,
 int main(int argc, char **argv)
 {
   int listenfd, connfd;
-  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE];
+  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE], response[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
   rio_t rio;
@@ -45,26 +45,26 @@ int main(int argc, char **argv)
 
     Rio_readinitb(&rio, connfd);
 
-    if (get_request(connfd, &rio, method, uri, version, headers) < 0)
+    if (get_request(connfd, &rio, method, uri, version, headers, endserver) < 0) // 굳이 version을 받아올 의미가 있나? 어차피 다 1.0으로 보낼건데?
     {
       Close(connfd);
       continue;
     };
     make_headers(headers);
-    // request_to_server();
+    request_to_server(method, uri, version, headers, endserver, response); // 응답 못 받았을 때의 처리 필요
     // send_response();
     Close(connfd);
   }
   return 0;
 }
 
-int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers)
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)
 {
   struct stat sbuf;
   char buf[MAXLINE];
   char filename[MAXLINE], cgiargs[MAXLINE];
 
-  read_request(rio, method, uri, version, headers);
+  read_request(rio, method, uri, version, headers, endserver);
 
   if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) // RFC 1945 - GET/HEAD/POST + 토큰의 extension-method..?
   {
@@ -85,10 +85,11 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
   return 0;
 }
 
-void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers)
+void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)
 {
   char buf[MAXLINE];
-  int is_request_line = 1;
+  int is_request_line, host_idx;
+  is_request_line = 1;
   while (strcmp(buf, "\r\n"))
   {
     if (is_request_line)
@@ -107,6 +108,10 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
       if (strcasecmp(buf, "Proxy-Connection: keep-alive"))
       {
         strcpy(buf, "Proxy-Connection: close");
+      }
+      if (host_idx = strstr(buf, "HOST: "))
+      {
+        strcpy(endserver, host_idx + 6);
       }
       strcat(headers, buf);
     }
@@ -130,7 +135,42 @@ void make_headers(char *headers)
   }
 }
 
-void request_to_server(){};
+int request_to_server(char *method, char *uri, char *version, char *headers, char *end_server, char *response)
+{
+  int clientfd, is_absolute_uri, is_port, request_port;
+  char request_uri[MAXLINE], full_http_request[MAXLINE];
+  rio_t rio;
+
+  is_absolute_uri = strstr(uri, "://");
+  if (is_absolute_uri)
+  {
+    strcpy(request_uri, uri);
+  }
+  else
+  {
+    sprintf(request_uri, "%s%s", end_server, uri);
+  }
+
+  is_port = is_absolute_uri ? strstr(is_absolute_uri + 3, ":") : strstr(uri, ":");
+  if (!is_port)
+  {
+    request_port = 80;
+  }
+  {
+    request_port = atoi(is_port + 1);
+  }
+
+  sprintf(full_http_request, "%s %s %s\n%s\r\n", method, uri, version, headers); // 그냥 uri 넣어도 되나? \r\n 한번만 들어가는게 맞나?
+
+  clientfd = Open_clientfd(request_uri, request_port);
+  Rio_readinitb(&rio, clientfd);
+
+  Rio_writen(clientfd, full_http_request, strlen(full_http_request));
+  Rio_readlineb(&rio, response, MAXLINE);
+
+  Close(clientfd);
+  return 0;
+};
 
 void send_response(){
 
