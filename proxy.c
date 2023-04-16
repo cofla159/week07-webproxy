@@ -10,7 +10,7 @@ static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
 
-void get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers);
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers);
 void request_to_server();
 void send_response();
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers);
@@ -43,8 +43,11 @@ int main(int argc, char **argv)
 
     Rio_readinitb(&rio, connfd);
 
-    get_request(connfd, &rio, method, uri, version, headers);
-    printf("method: %s\nuri: %s\nversion: %s\nheaders: %s", method, uri, version, headers);
+    if (get_request(connfd, &rio, method, uri, version, headers) < 0)
+    {
+      Close(connfd);
+      continue;
+    };
     // request_to_server();
     // send_response();
     Close(connfd);
@@ -52,7 +55,7 @@ int main(int argc, char **argv)
   return 0;
 }
 
-void get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers)
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers)
 {
   struct stat sbuf;
   char buf[MAXLINE];
@@ -64,12 +67,13 @@ void get_request(int fd, rio_t *rio, char *method, char *uri, char *version, cha
   {
     clienterror(fd, method, "501", "Not Implemented",
                 "Tiny does not implement this method");
-    return;
+    return -1;
   }
   if (!strcmp(version, "1.1"))
   {
     strcpy(version, "HTTP/1.0");
   }
+  return 0;
 }
 
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers)
