@@ -13,7 +13,7 @@ static const char *user_agent_hdr =
 
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response);
-void send_response();
+// void send_response(char *response, int connfd);
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
@@ -52,7 +52,8 @@ int main(int argc, char **argv)
     };
     make_headers(headers);
     request_to_server(method, uri, version, headers, endserver, response); // 응답 못 받았을 때의 처리 필요
-    // send_response();
+    // send_response(response, connfd);
+    Rio_writen(connfd, response, strlen(response));
     Close(connfd);
   }
   return 0;
@@ -60,10 +61,6 @@ int main(int argc, char **argv)
 
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)
 {
-  struct stat sbuf;
-  char buf[MAXLINE];
-  char filename[MAXLINE], cgiargs[MAXLINE];
-
   read_request(rio, method, uri, version, headers, endserver);
 
   if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) // RFC 1945 - GET/HEAD/POST + 토큰의 extension-method..?
@@ -76,10 +73,10 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
   {
     strcpy(version, "HTTP/1.0");
   }
-  if (strcasecmp(headers, "HOST:"))
+  if (strcasecmp(headers, "Host:"))
   {
     clienterror(fd, headers, "400", "Bad Request",
-                "HOST header is empty in the request");
+                "Host header is empty in the request");
     return -1;
   }
   return 0;
@@ -88,7 +85,8 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)
 {
   char buf[MAXLINE];
-  int is_request_line, host_idx;
+  int is_request_line;
+  char *host_idx;
   is_request_line = 1;
   while (strcmp(buf, "\r\n"))
   {
@@ -109,7 +107,7 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
       {
         strcpy(buf, "Proxy-Connection: close");
       }
-      if (host_idx = strstr(buf, "HOST: "))
+      if (host_idx = strstr(buf, "Host: "))
       {
         strcpy(endserver, host_idx + 6);
       }
@@ -120,7 +118,6 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 
 void make_headers(char *headers)
 {
-  char *connection_p, proxy_connection_p;
   if (strstr(headers, "User-Agent:"))
   {
     strcat(headers, user_agent_hdr);
@@ -137,8 +134,9 @@ void make_headers(char *headers)
 
 int request_to_server(char *method, char *uri, char *version, char *headers, char *end_server, char *response)
 {
-  int clientfd, is_absolute_uri, is_port, request_port;
-  char request_uri[MAXLINE], full_http_request[MAXLINE];
+  int clientfd;
+  char *is_absolute_uri, *is_port;
+  char request_uri[MAXLINE], full_http_request[MAXLINE], request_port[MAXLINE];
   rio_t rio;
 
   is_absolute_uri = strstr(uri, "://");
@@ -154,10 +152,10 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
   is_port = is_absolute_uri ? strstr(is_absolute_uri + 3, ":") : strstr(uri, ":");
   if (!is_port)
   {
-    request_port = 80;
+    strcpy(request_port, "80");
   }
   {
-    request_port = atoi(is_port + 1);
+    strcpy(request_port, is_port + 1);
   }
 
   sprintf(full_http_request, "%s %s %s\n%s\r\n", method, uri, version, headers); // 그냥 uri 넣어도 되나? \r\n 한번만 들어가는게 맞나?
@@ -172,9 +170,9 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
   return 0;
 };
 
-void send_response(){
+// void send_response(char *response, int connfd){
 
-};
+// };
 
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg)
