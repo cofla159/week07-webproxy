@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "./tiny/csapp.h"
 
 /* Recommended max cache and object sizes */
@@ -14,6 +15,7 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
 void request_to_server();
 void send_response();
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers);
+void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg);
 
@@ -48,6 +50,7 @@ int main(int argc, char **argv)
       Close(connfd);
       continue;
     };
+    make_headers(headers);
     // request_to_server();
     // send_response();
     Close(connfd);
@@ -73,6 +76,12 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
   {
     strcpy(version, "HTTP/1.0");
   }
+  if (strcasecmp(headers, "HOST:"))
+  {
+    clienterror(fd, headers, "400", "Bad Request",
+                "HOST header is empty in the request");
+    return -1;
+  }
   return 0;
 }
 
@@ -91,15 +100,37 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     else
     {
       Rio_readlineb(rio, buf, MAXLINE);
+      if (strcasecmp(buf, "Connection: keep-alive"))
+      {
+        strcpy(buf, "Connection: close");
+      }
+      if (strcasecmp(buf, "Proxy-Connection: keep-alive"))
+      {
+        strcpy(buf, "Proxy-Connection: close");
+      }
       strcat(headers, buf);
     }
   }
 }
 
-void request_to_server()
+void make_headers(char *headers)
 {
-  int clientfd;
-};
+  char *connection_p, proxy_connection_p;
+  if (strstr(headers, "User-Agent:"))
+  {
+    strcat(headers, user_agent_hdr);
+  }
+  if (strstr(headers, "Connection:"))
+  {
+    strcat(headers, "Connection: close");
+  }
+  if (strstr(headers, "Proxy-Connection:"))
+  {
+    strcat(headers, "Proxy-Connection: close");
+  }
+}
+
+void request_to_server(){};
 
 void send_response(){
 
