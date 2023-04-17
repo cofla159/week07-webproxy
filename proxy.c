@@ -55,7 +55,6 @@ int main(int argc, char **argv)
     request_to_server(method, uri, version, headers, endserver, response, &clientfd); // 응답 못 받았을 때의 처리 필요?
     send_response(response, connfd, clientfd);
     Close(connfd);
-    // Close(clientfd);
   }
   return 0;
 }
@@ -87,7 +86,7 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 {
   char buf[MAXLINE];
   int is_request_line;
-  char *host_idx;
+  char *host_idx, *host_name_s, *path;
   is_request_line = 1;
   while (strcmp(buf, "\r\n"))
   {
@@ -95,16 +94,26 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     {
       Rio_readlineb(rio, buf, MAXLINE);
       sscanf(buf, "%s %s %s", method, uri, version);
+      host_name_s = strstr(uri, "http://");
+      path = host_name_s ? strstr(host_name_s + 7, "/") : strstr(uri, "/");
+      if (path)
+      {
+        strcpy(uri, path);
+      }
+      else
+      {
+        strcpy(uri, "/");
+      }
       is_request_line = 0;
     }
     else
     {
       Rio_readlineb(rio, buf, MAXLINE);
-      if (!strcasecmp(buf, "Connection: keep-alive\n"))
+      if (strstr(buf, "Connection: keep-alive"))
       {
         strcpy(buf, "Connection: close\n");
       }
-      if (!strcasecmp(buf, "Proxy-Connection: keep-alive\n"))
+      if (strstr(buf, "Proxy-Connection: keep-alive"))
       {
         strcpy(buf, "Proxy-Connection: close\n");
       }
@@ -120,18 +129,22 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 
 void make_headers(char *headers)
 {
-  if (strstr(headers, "User-Agent:"))
+  // headers[strlen(headers) - 1] = '\0';
+  if (!strstr(headers, "User-Agent:"))
   {
     strcat(headers, user_agent_hdr);
+    strcat(headers, "\n");
   }
-  if (strstr(headers, "Connection:"))
+  if (!strstr(headers, "Connection:"))
   {
-    strcat(headers, "Connection: close");
+    strcat(headers, "Connection: close\n");
   }
-  if (strstr(headers, "Proxy-Connection:"))
+  if (!strstr(headers, "Proxy-Connection:"))
   {
-    strcat(headers, "Proxy-Connection: close");
+    strcat(headers, "Proxy-Connection: close\n");
   }
+  // strcat(headers, "\r\n");
+  // return headers;
 }
 
 int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response, int *clientfd)
@@ -162,6 +175,8 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
     *clientfd = Open_clientfd(request_uri, request_port);
   }
 
+  // printf("서버에 보내는 http request:\n%s\n", full_http_request);
+  // printf("----------------------------------");
   Rio_writen(*clientfd, full_http_request, strlen(full_http_request));
   return 0;
 };
@@ -178,7 +193,9 @@ void send_response(char *response, int connfd, int clientfd)
     strcat(response, buf);
   }
   Rio_writen(connfd, response, strlen(response));
-};
+
+  Close(clientfd);
+}
 
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg)
