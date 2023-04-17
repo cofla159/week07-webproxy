@@ -5,6 +5,7 @@
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+#define IS_LOCAL_SERVER 1
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
@@ -12,8 +13,8 @@ static const char *user_agent_hdr =
     "Firefox/10.0.3\r\n";
 
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
-int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response);
-// void send_response(char *response, int connfd);
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response, int clientfd);
+void send_response(char *response, int connfd, int clientfd);
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
@@ -21,7 +22,7 @@ void clienterror(int fd, char *cause, char *errnum,
 
 int main(int argc, char **argv)
 {
-  int listenfd, connfd;
+  int listenfd, connfd, clientfd;
   char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE], response[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
@@ -51,9 +52,8 @@ int main(int argc, char **argv)
       continue;
     };
     make_headers(headers);
-    request_to_server(method, uri, version, headers, endserver, response); // 응답 못 받았을 때의 처리 필요
-    // send_response(response, connfd);
-    Rio_writen(connfd, response, strlen(response));
+    request_to_server(method, uri, version, headers, endserver, response, clientfd); // 응답 못 받았을 때의 처리 필요
+    send_response(response, connfd, clientfd);
     Close(connfd);
   }
   return 0;
@@ -64,6 +64,7 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
   read_request(rio, method, uri, version, headers, endserver);
 
   if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) // RFC 1945 - GET/HEAD/POST + 토큰의 extension-method..?
+
   {
     clienterror(fd, method, "501", "Not Implemented",
                 "Tiny does not implement this method");
@@ -73,7 +74,7 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
   {
     strcpy(version, "HTTP/1.0");
   }
-  if (strcasecmp(headers, "Host:"))
+  if (!strstr(headers, "Host:"))
   {
     clienterror(fd, headers, "400", "Bad Request",
                 "Host header is empty in the request");
@@ -99,17 +100,18 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     else
     {
       Rio_readlineb(rio, buf, MAXLINE);
-      if (strcasecmp(buf, "Connection: keep-alive"))
+      if (!strcasecmp(buf, "Connection: keep-alive\n"))
       {
-        strcpy(buf, "Connection: close");
+        strcpy(buf, "Connection: close\n");
       }
-      if (strcasecmp(buf, "Proxy-Connection: keep-alive"))
+      if (!strcasecmp(buf, "Proxy-Connection: keep-alive\n"))
       {
-        strcpy(buf, "Proxy-Connection: close");
+        strcpy(buf, "Proxy-Connection: close\n");
       }
       if (host_idx = strstr(buf, "Host: "))
       {
-        strcpy(endserver, host_idx + 6);
+        strncpy(endserver, host_idx + 6, strlen(host_idx) - 7);
+        endserver[strlen(endserver) - 1] = '\0';
       }
       strcat(headers, buf);
     }
@@ -132,47 +134,51 @@ void make_headers(char *headers)
   }
 }
 
-int request_to_server(char *method, char *uri, char *version, char *headers, char *end_server, char *response)
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response, int clientfd)
 {
-  int clientfd;
-  char *is_absolute_uri, *is_port;
+  char *is_port, *rest_uri;
   char request_uri[MAXLINE], full_http_request[MAXLINE], request_port[MAXLINE];
   rio_t rio;
 
-  is_absolute_uri = strstr(uri, "://");
-  if (is_absolute_uri)
+  is_port = strstr(endserver, ":");
+  if (!is_port)
   {
-    strcpy(request_uri, uri);
+    strcpy(request_uri, endserver);
+    strcpy(request_port, "80");
   }
   else
   {
-    sprintf(request_uri, "%s%s", end_server, uri);
-  }
-
-  is_port = is_absolute_uri ? strstr(is_absolute_uri + 3, ":") : strstr(uri, ":");
-  if (!is_port)
-  {
-    strcpy(request_port, "80");
-  }
-  {
+    strncpy(request_uri, endserver, (int)(is_port - endserver));
     strcpy(request_port, is_port + 1);
   }
 
-  sprintf(full_http_request, "%s %s %s\n%s\r\n", method, uri, version, headers); // 그냥 uri 넣어도 되나? \r\n 한번만 들어가는게 맞나?
+  sprintf(full_http_request, "%s %s %s\n%s\r\n\r\n", method, uri, version, headers); // 그냥 uri 넣어도 되나? \r\n 한번만 들어가는게 맞나?
 
-  clientfd = Open_clientfd(request_uri, request_port);
+  if (IS_LOCAL_SERVER)
+  {
+    clientfd = Open_clientfd("localhost", request_port);
+  }
+  else
+  {
+    clientfd = Open_clientfd(request_uri, request_port);
+  }
   Rio_readinitb(&rio, clientfd);
 
   Rio_writen(clientfd, full_http_request, strlen(full_http_request));
-  Rio_readlineb(&rio, response, MAXLINE);
-
-  Close(clientfd);
   return 0;
 };
 
-// void send_response(char *response, int connfd){
+void send_response(char *response, int connfd, int clientfd)
+{
+  char buf[MAXLINE], response[MAXLINE];
+  rio_t *rio;
 
-// };
+  while (strcmp(buf, "\r\n"))
+  {
+    Rio_readlineb(rio, buf, MAXLINE);
+    strcat(response, buf);
+  }
+};
 
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg)
