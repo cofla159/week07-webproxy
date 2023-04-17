@@ -173,9 +173,8 @@ void send_response(char *response, int connfd, int clientfd)
 
   Rio_readinitb(&rio, clientfd);
 
-  while (strcmp(buf, "\r\n"))
+  while (Rio_readlineb(&rio, buf, MAXLINE) != 0)
   {
-    Rio_readlineb(&rio, buf, MAXLINE);
     strcat(response, buf);
   }
   Rio_writen(connfd, response, strlen(response));
