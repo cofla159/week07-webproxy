@@ -27,6 +27,7 @@ int main(int argc, char **argv)
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
   rio_t rio;
+  strcpy(uri, "");
 
   if (argc != 2)
   {
@@ -87,6 +88,8 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
   int is_request_line;
   char *host_idx, *host_name_s, *path;
   is_request_line = 1;
+  strcpy(uri, "");
+  strcpy(buf, "");
   while (strcmp(buf, "\r\n"))
   {
     if (is_request_line)
@@ -108,16 +111,14 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     else
     {
       Rio_readlineb(rio, buf, MAXLINE);
-      printf("버퍼: \n%s\n", buf);
-      // if (strstr(buf, "Connection:"))
-      // {
-      //   strcpy(buf, "Connection: close\n");
-      // }
-      // printf("검색결과 :%p\n", strstr(buf, "Proxy-Connection:"));
-      // if (strstr(buf, "Proxy-Connection:"))
-      // {
-      //   strcpy(buf, "Proxy-Connection: close\n"); // 헤더 파싱 안됨?
-      // }
+      if (strstr(buf, "Connection:"))
+      {
+        strcpy(buf, "Connection: close\n");
+      }
+      if (strstr(buf, "Proxy-Connection:"))
+      {
+        strcpy(buf, "Proxy-Connection: close\n");
+      }
       if (host_idx = strstr(buf, "Host: "))
       {
         strncpy(endserver, host_idx + 6, strlen(host_idx) - 7);
@@ -180,7 +181,6 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
   }
 
   Rio_writen(*clientfd, full_http_request, strlen(full_http_request));
-  printf("proxy to tiny:\n%s\n", full_http_request);
   return 0;
 };
 
@@ -206,27 +206,11 @@ void send_response(int connfd, int clientfd)
     strcat(header, buf);
   }
   Rio_writen(connfd, header, strlen(header));
-  printf("header:\n%s\n.", header);
-
-  // char response[content_length + strlen(header)];
-  // char body[content_length];
-  // strcpy(response, "");
-  // strcpy(body, "");
-
-  // while (Rio_readlineb(&rio, buf, MAXLINE) != 0)
-  // {
-  //   strcat(response, buf);
-  // }
-
-  // Rio_readnb(&rio, body, content_length);
 
   char *body = malloc(content_length);
   Rio_readnb(&rio, body, content_length);
-
-  // strcat(response, header);
-  // strcat(response, body);
   Rio_writen(connfd, body, content_length);
-  printf("body:\n%s\n", body);
+
   free(body);
   Close(clientfd);
 }
