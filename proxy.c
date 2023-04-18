@@ -49,7 +49,6 @@ int main(int argc, char **argv)
     if (get_request(connfd, &rio, method, uri, version, headers, endserver) < 0) // 굳이 version을 받아올 의미가 있나? 어차피 다 1.0으로 보낼건데?
     {
       Close(connfd);
-      continue;
     };
     make_headers(headers);
     request_to_server(method, uri, version, headers, endserver, &clientfd); // 응답 못 받았을 때의 처리 필요?
@@ -69,7 +68,7 @@ int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char
                 "Tiny does not implement this method");
     return -1;
   }
-  if (!strcmp(version, "1.1"))
+  if (!strcmp(version, "HTTP/1.1"))
   {
     strcpy(version, "HTTP/1.0");
   }
@@ -109,14 +108,16 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     else
     {
       Rio_readlineb(rio, buf, MAXLINE);
-      if (strstr(buf, "Connection: keep-alive"))
-      {
-        strcpy(buf, "Connection: close\n");
-      }
-      if (strstr(buf, "Proxy-Connection: keep-alive"))
-      {
-        strcpy(buf, "Proxy-Connection: close\n");
-      }
+      printf("버퍼: \n%s\n", buf);
+      // if (strstr(buf, "Connection:"))
+      // {
+      //   strcpy(buf, "Connection: close\n");
+      // }
+      // printf("검색결과 :%p\n", strstr(buf, "Proxy-Connection:"));
+      // if (strstr(buf, "Proxy-Connection:"))
+      // {
+      //   strcpy(buf, "Proxy-Connection: close\n"); // 헤더 파싱 안됨?
+      // }
       if (host_idx = strstr(buf, "Host: "))
       {
         strncpy(endserver, host_idx + 6, strlen(host_idx) - 7);
@@ -129,19 +130,25 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 
 void make_headers(char *headers)
 {
+  char new_header[MAXLINE];
+  strcpy(new_header, "");
+  strncpy(new_header, headers, strlen(headers) - 2);
+
   if (!strstr(headers, "User-Agent:"))
   {
-    strcat(headers, user_agent_hdr);
-    strcat(headers, "\n");
+    strcat(new_header, user_agent_hdr);
   }
   if (!strstr(headers, "Connection:"))
   {
-    strcat(headers, "Connection: close\n");
+    strcat(new_header, "Connection: close\n");
   }
   if (!strstr(headers, "Proxy-Connection:"))
   {
-    strcat(headers, "Proxy-Connection: close\n");
+    strcat(new_header, "Proxy-Connection: close\n");
   }
+  strcat(new_header, "\r\n");
+  strcpy(headers, "");
+  strcpy(headers, new_header);
 }
 
 int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd)
@@ -173,6 +180,7 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
   }
 
   Rio_writen(*clientfd, full_http_request, strlen(full_http_request));
+  printf("proxy to tiny:\n%s\n", full_http_request);
   return 0;
 };
 
@@ -184,6 +192,7 @@ void send_response(int connfd, int clientfd)
 
   Rio_readinitb(&rio, clientfd);
   strcpy(buf, "");
+  strcpy(header, "");
   while (strcmp(buf, "\r\n"))
   {
     Rio_readlineb(&rio, buf, MAXLINE);
@@ -196,15 +205,29 @@ void send_response(int connfd, int clientfd)
     }
     strcat(header, buf);
   }
+  Rio_writen(connfd, header, strlen(header));
+  printf("header:\n%s\n.", header);
 
-  char response[content_length + strlen(header)];
-  strcat(response, header);
-  while (Rio_readlineb(&rio, buf, MAXLINE) != 0)
-  {
-    strcat(response, buf);
-  }
-  Rio_writen(connfd, response, strlen(response));
+  // char response[content_length + strlen(header)];
+  // char body[content_length];
+  // strcpy(response, "");
+  // strcpy(body, "");
 
+  // while (Rio_readlineb(&rio, buf, MAXLINE) != 0)
+  // {
+  //   strcat(response, buf);
+  // }
+
+  // Rio_readnb(&rio, body, content_length);
+
+  char *body = malloc(content_length);
+  Rio_readnb(&rio, body, content_length);
+
+  // strcat(response, header);
+  // strcat(response, body);
+  Rio_writen(connfd, body, content_length);
+  printf("body:\n%s\n", body);
+  free(body);
   Close(clientfd);
 }
 
