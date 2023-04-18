@@ -13,8 +13,8 @@ static const char *user_agent_hdr =
     "Firefox/10.0.3\r\n";
 
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
-int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response, int *clientfd);
-void send_response(char *response, int connfd, int clientfd);
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd);
+void send_response(int connfd, int clientfd);
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
@@ -23,7 +23,7 @@ void clienterror(int fd, char *cause, char *errnum,
 int main(int argc, char **argv)
 {
   int listenfd, connfd, *clientfd;
-  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE], response[MAXLINE];
+  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
   rio_t rio;
@@ -52,8 +52,8 @@ int main(int argc, char **argv)
       continue;
     };
     make_headers(headers);
-    request_to_server(method, uri, version, headers, endserver, response, &clientfd); // 응답 못 받았을 때의 처리 필요?
-    send_response(response, connfd, clientfd);
+    request_to_server(method, uri, version, headers, endserver, &clientfd); // 응답 못 받았을 때의 처리 필요?
+    send_response(connfd, clientfd);
     Close(connfd);
   }
   return 0;
@@ -129,7 +129,6 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 
 void make_headers(char *headers)
 {
-  // headers[strlen(headers) - 1] = '\0';
   if (!strstr(headers, "User-Agent:"))
   {
     strcat(headers, user_agent_hdr);
@@ -143,11 +142,9 @@ void make_headers(char *headers)
   {
     strcat(headers, "Proxy-Connection: close\n");
   }
-  // strcat(headers, "\r\n");
-  // return headers;
 }
 
-int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, char *response, int *clientfd)
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd)
 {
   char *is_port, *rest_uri;
   char request_uri[MAXLINE], full_http_request[MAXLINE], request_port[MAXLINE];
@@ -175,19 +172,33 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
     *clientfd = Open_clientfd(request_uri, request_port);
   }
 
-  // printf("서버에 보내는 http request:\n%s\n", full_http_request);
-  // printf("----------------------------------");
   Rio_writen(*clientfd, full_http_request, strlen(full_http_request));
   return 0;
 };
 
-void send_response(char *response, int connfd, int clientfd)
+void send_response(int connfd, int clientfd)
 {
-  char buf[MAXLINE];
+  char buf[MAXLINE], header[MAXLINE];
   rio_t rio;
+  int content_length;
 
   Rio_readinitb(&rio, clientfd);
+  strcpy(buf, "");
+  while (strcmp(buf, "\r\n"))
+  {
+    Rio_readlineb(&rio, buf, MAXLINE);
+    if (strstr(buf, "Content-length:"))
+    {
+      char *p = strchr(buf, ':');
+      char temp_str[MAXLINE];
+      strcpy(temp_str, p + 1);
+      content_length = atoi(temp_str);
+    }
+    strcat(header, buf);
+  }
 
+  char response[content_length + strlen(header)];
+  strcat(response, header);
   while (Rio_readlineb(&rio, buf, MAXLINE) != 0)
   {
     strcat(response, buf);
