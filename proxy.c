@@ -12,6 +12,13 @@ static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
 
+typedef struct variable_t
+{
+  int *connfdp, *clientfd;
+  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE];
+  rio_t rio;
+} variable_t;
+
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd);
 void send_response(int connfd, int clientfd);
@@ -19,15 +26,15 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg);
+void *thread(void *vargp);
 
 int main(int argc, char **argv)
 {
-  int listenfd, connfd, *clientfd;
-  char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
-  rio_t rio;
-  strcpy(uri, "");
+  pthread_t tid;
+  int listenfd;
+  variable_t *variables;
 
   if (argc != 2)
   {
@@ -38,25 +45,42 @@ int main(int argc, char **argv)
   listenfd = Open_listenfd(argv[1]);
   while (1)
   {
+    variables = (variable_t *)Malloc(sizeof(variable_t));
+    strcpy(variables->uri, "");
+
     clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr,
-                    &clientlen);
-    Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
-                0);
-    printf("Accepted connection from host: (%s, %s)\n", hostname, port);
+    variables->connfdp = (int *)Malloc(sizeof(int));
+    *(variables->connfdp) = Accept(listenfd, (SA *)&clientaddr,
+                                   &clientlen);
 
-    Rio_readinitb(&rio, connfd);
+    Getnameinfo((SA *)&clientaddr, clientlen, variables->hostname, MAXLINE, variables->port, MAXLINE, 0);
+    printf("Accepted connection from host: (%s, %s)\n", variables->hostname, variables->port);
 
-    if (get_request(connfd, &rio, method, uri, version, headers, endserver) < 0) // 굳이 version을 받아올 의미가 있나? 어차피 다 1.0으로 보낼건데?
-    {
-      Close(connfd);
-    };
-    make_headers(headers);
-    request_to_server(method, uri, version, headers, endserver, &clientfd); // 응답 못 받았을 때의 처리 필요?
-    send_response(connfd, clientfd);
-    Close(connfd);
+    Pthread_create(&tid, NULL, thread, variables);
   }
   return 0;
+}
+
+void *thread(void *vargp)
+{
+  variable_t *variables = (variable_t *)vargp;
+  int connfd = *(variables->connfdp);
+
+  Pthread_detach(pthread_self());
+
+  Rio_readinitb(&(variables->rio), connfd);
+
+  if (get_request(connfd, &(variables->rio), variables->method, variables->uri, variables->version, variables->headers, variables->endserver) < 0) // 굳이 version을 받아올 의미가 있나? 어차피 다 1->0으로 보낼건데?
+  {
+    Close(connfd);
+  };
+  make_headers(variables->headers);
+  request_to_server(variables->method, variables->uri, variables->version, variables->headers, variables->endserver, &(variables->clientfd)); // 응답 못 받았을 때의 처리 필요?
+  send_response(connfd, variables->clientfd);
+
+  Free(vargp);
+  Close(connfd);
+  return NULL;
 }
 
 int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)

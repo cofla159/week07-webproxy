@@ -26,8 +26,8 @@ PORT_MAX=65000
 MAX_PORT_TRIES=10
 
 # List of text and binary files for the basic test
-BASIC_LIST="home.html
-            csapp.c
+BASIC_LIST="csapp.c
+            home.html
             tiny.c
             godzilla.jpg
             tiny"
@@ -298,7 +298,7 @@ wait_for_port_use "${proxy_port}"
 # Run a special blocking nop-server that never responds to requests
 nop_port=$(free_port)
 echo "Starting the blocking NOP server on port ${nop_port}"
-./nop-server.py ${nop_port} &> /dev/null &
+python3 nop-server.py ${nop_port} &> /dev/null &
 nop_pid=$!
 
 # Wait for the nop server to start in earnest
