@@ -5,28 +5,36 @@
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
-#define IS_LOCAL_SERVER 1
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
 
-typedef struct variable_t
+typedef struct
 {
   int *connfdp, *clientfd;
   char hostname[MAXLINE], port[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headers[MAXLINE], endserver[MAXLINE];
   rio_t rio;
 } variable_t;
 
-int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
-int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd);
+typedef struct
+{
+  char path[MAXLINE];
+  char contents[MAX_OBJECT_SIZE];
+  node_t *next;
+} node_t;
+
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver, node_t *head);
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd, node_t *head);
 void send_response(int connfd, int clientfd);
 void read_request(rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver);
 void make_headers(char *headers);
 void clienterror(int fd, char *cause, char *errnum,
                  char *shortmsg, char *longmsg);
 void *thread(void *vargp);
+node_t *check_caching(char *uri, node_t *head);
+void add_caching(node_t *head, char *uri, char *full_http_request);
 
 int main(int argc, char **argv)
 {
@@ -45,7 +53,7 @@ int main(int argc, char **argv)
   listenfd = Open_listenfd(argv[1]);
   while (1)
   {
-    variables = (variable_t *)Malloc(sizeof(variable_t));
+    variable_t *varibles = (variable_t *)Malloc(sizeof(variable_t));
     strcpy(variables->uri, "");
 
     clientlen = sizeof(clientaddr);
@@ -65,17 +73,18 @@ void *thread(void *vargp)
 {
   variable_t *variables = (variable_t *)vargp;
   int connfd = *(variables->connfdp);
+  node_t *head = NULL;
 
   Pthread_detach(pthread_self());
 
   Rio_readinitb(&(variables->rio), connfd);
 
-  if (get_request(connfd, &(variables->rio), variables->method, variables->uri, variables->version, variables->headers, variables->endserver) < 0) // 굳이 version을 받아올 의미가 있나? 어차피 다 1->0으로 보낼건데?
+  if (get_request(connfd, &(variables->rio), variables->method, variables->uri, variables->version, variables->headers, variables->endserver, head) < 0) // version을 받아오는 의미가 있나 어차피 다 1.0으로 보낼건데?
   {
     Close(connfd);
   };
   make_headers(variables->headers);
-  request_to_server(variables->method, variables->uri, variables->version, variables->headers, variables->endserver, &(variables->clientfd)); // 응답 못 받았을 때의 처리 필요?
+  request_to_server(variables->method, variables->uri, variables->version, variables->headers, variables->endserver, &(variables->clientfd), head);
   send_response(connfd, variables->clientfd);
 
   Free(vargp);
@@ -83,11 +92,17 @@ void *thread(void *vargp)
   return NULL;
 }
 
-int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver)
+int get_request(int fd, rio_t *rio, char *method, char *uri, char *version, char *headers, char *endserver, node_t *header)
 {
+  node_t *found_node;
   read_request(rio, method, uri, version, headers, endserver);
 
-  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) // RFC 1945 - GET/HEAD/POST + 토큰의 extension-method..?
+  if (found_node = check_caching(uri, header))
+  {
+    Rio_writen(fd, found_node->contents, strlen(found_node->contents));
+  }
+
+  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD"))
   {
     clienterror(fd, method, "501", "Not Implemented",
                 "Tiny does not implement this method");
@@ -120,6 +135,7 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
     {
       Rio_readlineb(rio, buf, MAXLINE);
       sscanf(buf, "%s %s %s", method, uri, version);
+
       host_name_s = strstr(uri, "http://");
       path = host_name_s ? strstr(host_name_s + 7, "/") : strstr(uri, "/");
       if (path)
@@ -153,6 +169,22 @@ void read_request(rio_t *rio, char *method, char *uri, char *version, char *head
   }
 }
 
+node_t *check_caching(char *uri, node_t *head)
+{
+  if (!head)
+    return NULL;
+
+  node_t now_node = *head;
+  while (now_node.next)
+  {
+    if (now_node.path == uri)
+      // 노드 맨 앞으로 옮겨주기
+      return &now_node;
+    now_node = *(now_node.next);
+  }
+  return NULL;
+}
+
 void make_headers(char *headers)
 {
   char new_header[MAXLINE];
@@ -176,7 +208,7 @@ void make_headers(char *headers)
   strcpy(headers, new_header);
 }
 
-int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd)
+int request_to_server(char *method, char *uri, char *version, char *headers, char *endserver, int *clientfd, node_t *head)
 {
   char *is_port, *rest_uri;
   char request_uri[MAXLINE], full_http_request[MAXLINE], request_port[MAXLINE];
@@ -194,19 +226,24 @@ int request_to_server(char *method, char *uri, char *version, char *headers, cha
   }
 
   sprintf(full_http_request, "%s %s %s\n%s\r\n\r\n", method, uri, version, headers);
-
-  if (IS_LOCAL_SERVER)
+  if (strlen(full_http_request) <= MAX_OBJECT_SIZE)
   {
-    *clientfd = Open_clientfd("localhost", request_port);
-  }
-  else
-  {
-    *clientfd = Open_clientfd(request_uri, request_port);
+    add_caching(head, uri, full_http_request);
   }
 
+  *clientfd = Open_clientfd(request_uri, request_port);
   Rio_writen(*clientfd, full_http_request, strlen(full_http_request));
   return 0;
 };
+
+void add_caching(node_t *head, char uri[], char full_http_request[])
+{
+  node_t *new_node = (node_t *)Malloc(sizeof(node_t));
+  strcpy(new_node->path, uri);
+  strcpy(new_node->contents, full_http_request);
+  new_node->next = *head;
+  head = new_node
+}
 
 void send_response(int connfd, int clientfd)
 {
